@@ -86,11 +86,13 @@ void enc_destroy(void *userdata){
     destroy_enc_state(ENC_DATA);
 }
 
-char* rewrite_path(char* old_path){
+char* rewrite_path(const char* old_path){
     char* new_path;
-    int len;
+    int len=0;
+    /* Calculate length. Allocate string, and initialize str */
     len = strlen(old_path) + strlen(ENC_DATA->rootdir) + 1;
     new_path = malloc(sizeof(char)*len);
+    new_path[0] = '\0';
     if(new_path == NULL){
         fprintf(stderr, "ERROR: Could not allocate memory in rewrite_path().\n");
         return NULL;
@@ -125,8 +127,10 @@ int log_msg(char *fmt, ...){
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
     int res;
-
-    res = lstat(path, stbuf);
+    const char* new_path = rewrite_path(path);
+    //res = lstat(path, stbuf);
+    res = lstat(new_path, stbuf);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -136,7 +140,10 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 static int xmp_access(const char *path, int mask)
 {
     int res;
-    res = access(path, mask);
+    const char* new_path = rewrite_path(path);
+    //res = access(path, mask);
+    res = access(new_path, mask);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -146,8 +153,10 @@ static int xmp_access(const char *path, int mask)
 static int xmp_readlink(const char *path, char *buf, size_t size)
 {
     int res;
-
-    res = readlink(path, buf, size - 1);
+    const char* new_path = rewrite_path(path);
+    //res = readlink(path, buf, size - 1);
+    res = readlink(new_path, buf, size - 1);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -165,8 +174,11 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 
     (void) offset;
     (void) fi;
+    const char* new_path = rewrite_path(path);
 
-    dp = opendir(path);
+    //dp = opendir(path);
+    dp = opendir(new_path);
+    free((void*)new_path);
     if (dp == NULL)
         return -errno;
 
@@ -186,28 +198,32 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 static int xmp_mknod(const char *path, mode_t mode, dev_t rdev)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
     /* On Linux this could just be 'mknod(path, mode, rdev)' but this
        is more portable */
     if (S_ISREG(mode)) {
-        res = open(path, O_CREAT | O_EXCL | O_WRONLY, mode);
+        res = open(new_path, O_CREAT | O_EXCL | O_WRONLY, mode);
         if (res >= 0)
             res = close(res);
     } else if (S_ISFIFO(mode))
-        res = mkfifo(path, mode);
+        res = mkfifo(new_path, mode);
     else
-        res = mknod(path, mode, rdev);
+        res = mknod(new_path, mode, rdev);
     if (res == -1)
         return -errno;
 
+    free((void*)new_path);
     return 0;
 }
 
 static int xmp_mkdir(const char *path, mode_t mode)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = mkdir(path, mode);
+    res = mkdir(new_path, mode);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -217,8 +233,10 @@ static int xmp_mkdir(const char *path, mode_t mode)
 static int xmp_unlink(const char *path)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = unlink(path);
+    res = unlink(new_path);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -228,8 +246,10 @@ static int xmp_unlink(const char *path)
 static int xmp_rmdir(const char *path)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = rmdir(path);
+    res = rmdir(new_path);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -239,8 +259,12 @@ static int xmp_rmdir(const char *path)
 static int xmp_symlink(const char *from, const char *to)
 {
     int res;
+    const char* new_from = rewrite_path(from);
+    const char* new_to = rewrite_path(to);
 
-    res = symlink(from, to);
+    res = symlink(new_from, new_to);
+    free((void*)new_from);
+    free((void*)new_to);
     if (res == -1)
         return -errno;
 
@@ -250,8 +274,12 @@ static int xmp_symlink(const char *from, const char *to)
 static int xmp_rename(const char *from, const char *to)
 {
     int res;
+    const char* new_from = rewrite_path(from);
+    const char* new_to = rewrite_path(to);
 
-    res = rename(from, to);
+    res = rename(new_from, new_to);
+    free((void*)new_from);
+    free((void*)new_to);
     if (res == -1)
         return -errno;
 
@@ -261,8 +289,12 @@ static int xmp_rename(const char *from, const char *to)
 static int xmp_link(const char *from, const char *to)
 {
     int res;
+    const char* new_from = rewrite_path(from);
+    const char* new_to = rewrite_path(to);
 
-    res = link(from, to);
+    res = link(new_from, new_to);
+    free((void*)new_from);
+    free((void*)new_to);
     if (res == -1)
         return -errno;
 
@@ -272,8 +304,10 @@ static int xmp_link(const char *from, const char *to)
 static int xmp_chmod(const char *path, mode_t mode)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = chmod(path, mode);
+    res = chmod(new_path, mode);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -283,8 +317,10 @@ static int xmp_chmod(const char *path, mode_t mode)
 static int xmp_chown(const char *path, uid_t uid, gid_t gid)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = lchown(path, uid, gid);
+    res = lchown(new_path, uid, gid);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -294,8 +330,10 @@ static int xmp_chown(const char *path, uid_t uid, gid_t gid)
 static int xmp_truncate(const char *path, off_t size)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = truncate(path, size);
+    res = truncate(new_path, size);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -306,13 +344,15 @@ static int xmp_utimens(const char *path, const struct timespec ts[2])
 {
     int res;
     struct timeval tv[2];
+    const char* new_path = rewrite_path(path);
 
     tv[0].tv_sec = ts[0].tv_sec;
     tv[0].tv_usec = ts[0].tv_nsec / 1000;
     tv[1].tv_sec = ts[1].tv_sec;
     tv[1].tv_usec = ts[1].tv_nsec / 1000;
 
-    res = utimes(path, tv);
+    res = utimes(new_path, tv);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -322,8 +362,10 @@ static int xmp_utimens(const char *path, const struct timespec ts[2])
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
     int res;
-
-    res = open(path, fi->flags);
+    const char* new_path = rewrite_path(path);
+    //res = open(path, fi->flags);
+    res = open(new_path, fi->flags);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -336,9 +378,11 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 {
     int fd;
     int res;
+    const char* new_path = rewrite_path(path);
 
     (void) fi;
-    fd = open(path, O_RDONLY);
+    fd = open(new_path, O_RDONLY);
+    free((void*)new_path);
     if (fd == -1)
         return -errno;
 
@@ -355,9 +399,11 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 {
     int fd;
     int res;
+    const char* new_path = rewrite_path(path);
 
     (void) fi;
-    fd = open(path, O_WRONLY);
+    fd = open(new_path, O_WRONLY);
+    free((void*)new_path);
     if (fd == -1)
         return -errno;
 
@@ -372,8 +418,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
 {
     int res;
+    const char* new_path = rewrite_path(path);
 
-    res = statvfs(path, stbuf);
+    res = statvfs(new_path, stbuf);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
 
@@ -385,7 +433,10 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
     (void) fi;
 
     int res;
-    res = creat(path, mode);
+    const char* new_path = rewrite_path(path);
+
+    res = creat(new_path, mode);
+    free((void*)new_path);
     if(res == -1)
     return -errno;
 
@@ -421,7 +472,9 @@ static int xmp_fsync(const char *path, int isdatasync,
 static int xmp_setxattr(const char *path, const char *name, const char *value,
             size_t size, int flags)
 {
-    int res = lsetxattr(path, name, value, size, flags);
+    const char* new_path = rewrite_path(path);
+    int res = lsetxattr(new_path, name, value, size, flags);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
     return 0;
@@ -430,7 +483,9 @@ static int xmp_setxattr(const char *path, const char *name, const char *value,
 static int xmp_getxattr(const char *path, const char *name, char *value,
             size_t size)
 {
-    int res = lgetxattr(path, name, value, size);
+    const char* new_path = rewrite_path(path);
+    int res = lgetxattr(new_path, name, value, size);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
     return res;
@@ -438,7 +493,9 @@ static int xmp_getxattr(const char *path, const char *name, char *value,
 
 static int xmp_listxattr(const char *path, char *list, size_t size)
 {
-    int res = llistxattr(path, list, size);
+    const char* new_path = rewrite_path(path);
+    int res = llistxattr(new_path, list, size);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
     return res;
@@ -446,7 +503,9 @@ static int xmp_listxattr(const char *path, char *list, size_t size)
 
 static int xmp_removexattr(const char *path, const char *name)
 {
-    int res = lremovexattr(path, name);
+    const char* new_path = rewrite_path(path);
+    int res = lremovexattr(new_path, name);
+    free((void*)new_path);
     if (res == -1)
         return -errno;
     return 0;
@@ -499,7 +558,6 @@ int main(int argc, char *argv[])
     /* Copy the password and rootdir to our private data struct */
     es->enc_key = strdup(argv[1]);
     es->rootdir = strdup(argv[2]);
-
     /* Set the first arg to the name of the program */
     argv[2] = argv[0];
     return fuse_main(argc-2, argv+2, &xmp_oper, es);
