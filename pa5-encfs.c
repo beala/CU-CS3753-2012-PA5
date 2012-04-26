@@ -38,6 +38,8 @@
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -46,6 +48,79 @@
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
 #endif
+
+#define USAGE "Usage:\n\t./pa5-encfs KEY ENC_DIR MOUNT_POINT\n"
+#define LOGFILE "encfs_log"
+
+/* Macro for accessing the private data struct */
+#define ENC_DATA (((EncState*)fuse_get_context()->private_data))
+
+typedef struct {
+    char *rootdir;
+    char *enc_key;
+} EncState;
+
+EncState* init_enc_state(){
+    EncState* enc_structp = NULL;
+    enc_structp = malloc(sizeof(EncState));
+    if(enc_structp == NULL){
+        fprintf(stderr, "There was an error allocating memory for the state struct. Exiting.\n");
+        exit(EXIT_FAILURE);
+    }
+    return enc_structp;
+}
+
+void destroy_enc_state(EncState* enc_structp){
+    free(enc_structp->rootdir);
+    free(enc_structp->enc_key);
+    free(enc_structp);
+}
+
+void *enc_init(struct fuse_conn_info *conn){
+    (void)conn;
+    return ENC_DATA;
+}
+
+void enc_destroy(void *userdata){
+    (void)userdata;
+    destroy_enc_state(ENC_DATA);
+}
+
+char* rewrite_path(char* old_path){
+    char* new_path;
+    int len;
+    len = strlen(old_path) + strlen(ENC_DATA->rootdir) + 1;
+    new_path = malloc(sizeof(char)*len);
+    if(new_path == NULL){
+        fprintf(stderr, "ERROR: Could not allocate memory in rewrite_path().\n");
+        return NULL;
+    }
+    strcat(new_path, ENC_DATA->rootdir);
+    strcat(new_path, old_path);
+    return new_path;
+}
+
+/* Truncate the log file. */
+int truncate_log(){
+    FILE *logfp = NULL;
+    logfp = fopen(LOGFILE, "w");
+    fclose(logfp);
+    return 0;
+}
+
+/* Append a message to the log file. */
+int log_msg(char *fmt, ...){
+    va_list argptr;
+    va_start(argptr, fmt);
+    FILE *logfp = NULL;
+    logfp = fopen(LOGFILE, "a");
+    if(logfp == NULL)
+        exit(EXIT_FAILURE);
+    vfprintf(logfp, fmt, argptr);
+    fclose(logfp);
+    va_end(argptr);
+    return 0;
+}
 
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
@@ -61,7 +136,6 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 static int xmp_access(const char *path, int mask)
 {
     int res;
-
     res = access(path, mask);
     if (res == -1)
         return -errno;
@@ -85,6 +159,7 @@ static int xmp_readlink(const char *path, char *buf, size_t size)
 static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
                off_t offset, struct fuse_file_info *fi)
 {
+
     DIR *dp;
     struct dirent *de;
 
@@ -401,6 +476,8 @@ static struct fuse_operations xmp_oper = {
     .create         = xmp_create,
     .release    = xmp_release,
     .fsync      = xmp_fsync,
+    .init       = enc_init,
+    .destroy    = enc_destroy,
 #ifdef HAVE_SETXATTR
     .setxattr   = xmp_setxattr,
     .getxattr   = xmp_getxattr,
@@ -411,6 +488,19 @@ static struct fuse_operations xmp_oper = {
 
 int main(int argc, char *argv[])
 {
+    EncState* es = init_enc_state();
     umask(0);
-    return fuse_main(argc, argv, &xmp_oper, NULL);
+    /* Check the arguments */
+    if(argc < 4){
+        fprintf(stderr, "ERROR: Not enough arguments.\n");
+        fprintf(stderr, USAGE);
+        exit(EXIT_FAILURE);
+    }
+    /* Copy the password and rootdir to our private data struct */
+    es->enc_key = strdup(argv[1]);
+    es->rootdir = strdup(argv[2]);
+
+    /* Set the first arg to the name of the program */
+    argv[2] = argv[0];
+    return fuse_main(argc-2, argv+2, &xmp_oper, es);
 }
