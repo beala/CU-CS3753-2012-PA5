@@ -291,6 +291,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 {
     int res;
     time_t atime, mtime, ctime;
+    mode_t mode;
     const char* new_path = rewrite_path(path);
     const char* tmp_name;
     /* Test if the file exists */
@@ -303,6 +304,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
         atime = stbuf->st_atime;
         mtime = stbuf->st_mtime;
         ctime = stbuf->st_ctime;
+        mode = stbuf->st_mode;
         /* Decrypt and get its attrs */
         tmp_name = tmp_path(new_path);
         dec_file_copy(path, tmp_name);
@@ -313,6 +315,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
         stbuf->st_atime = atime;
         stbuf->st_mtime = mtime;
         stbuf->st_ctime = ctime;
+        stbuf->st_mode= mode;
         /* Remove the copy */
         remove(tmp_name);
         free((void*)new_path);
@@ -331,7 +334,7 @@ static int xmp_access(const char *path, int mask)
     if (res == -1)
         return -errno;
 
-    return 0;
+    return res;
 }
 
 static int xmp_readlink(const char *path, char *buf, size_t size)
