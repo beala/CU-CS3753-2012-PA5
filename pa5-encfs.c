@@ -54,6 +54,9 @@
 #define LOGFILE "encfs_log"
 #define TMPSUFFIX ".really_awesome_enc"
 
+#define ENCATTR "user.pa5-encfs.encrypted"
+#define MAXATTR 6
+
 /* Macro for accessing the private data struct */
 #define ENC_DATA (((EncState*)fuse_get_context()->private_data))
 
@@ -86,6 +89,37 @@ void *enc_init(struct fuse_conn_info *conn){
 void enc_destroy(void *userdata){
     (void)userdata;
     destroy_enc_state(ENC_DATA);
+}
+
+/* Get the enc attr.
+ * Return:
+ *  1: set to "true"
+ *  0: set to "false"
+ *  -1: attr doesn't exist
+ */
+int getencattr(const char* path){
+    ssize_t attrsize = -1;
+    char attrstr[MAXATTR] = "";
+    attrsize = getxattr(path, ENCATTR, attrstr, MAXATTR);
+    if(attrsize == -1){
+        return -1;
+    } else if(strcmp(attrstr, "true") == 0) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+int setencattr(const char* path, int val){
+    char strval[MAXATTR];
+    if(val){
+        strcpy(strval, "true");
+    } else {
+        strcpy(strval, "false");
+    }
+    if(setxattr(path, ENCATTR, strval, MAXATTR, 0))
+        return -errno;
+    return 0;
 }
 
 char* trans_flags(int flags){
@@ -127,10 +161,19 @@ char* rewrite_path(const char* old_path){
     return new_path;
 }
 
+/* Decrypt a file at `path`, and store the decrypted version back to
+ * `path`.
+ * Only decrypt if its ENCATTR is set to true.
+ * Return 0 if it was decrypted.
+ * Return 1 if it wasn't.
+ */
 int dec_file(const char* path){
     const char* tmp_name;
     const char* new_path = rewrite_path(path);
     FILE *enc_fp, *dec_fp;
+
+    if(getencattr(new_path) != 1)
+        return 1;
 
     /* Open encrypted copy */
     enc_fp = fopen(new_path, "r");
@@ -146,6 +189,8 @@ int dec_file(const char* path){
     /* Rename decrypted copy to original name */
     rename(tmp_name, new_path);
     fprintf(stderr, "Dec! New: %s Tmp: %s\n", new_path, tmp_name);
+    /* Set the encryption attr */
+    setencattr(new_path, 0);
     free((void*)new_path);
     free((void*)tmp_name);
     return 0;
@@ -155,6 +200,9 @@ int enc_file(const char* path){
     const char* tmp_name;
     const char* new_path = rewrite_path(path);
     FILE *enc_fp, *dec_fp;
+
+    if(getencattr(new_path) != 0)
+        return 1;
 
     /* Open decrypted copy */
     dec_fp = fopen(new_path, "r");
@@ -170,6 +218,8 @@ int enc_file(const char* path){
     /* Rename encrypted copy to original name */
     rename(tmp_name, new_path);
     fprintf(stderr, "Enc! New: %s Tmp: %s\n", new_path, tmp_name);
+    /* Set the encryption attr */
+    setencattr(new_path, 1);
     free((void*)new_path);
     free((void*)tmp_name);
     return 0;
@@ -183,7 +233,10 @@ int enc_file_copy(const char* path, const char* dest_path){
     dec_fp = fopen(new_path, "r");
     /* Make encrypted copy at tmp_name */
     enc_fp = fopen(dest_path, "w");
-    do_crypt(dec_fp, enc_fp, 1, ENC_DATA->enc_key);
+    if(getencattr(new_path) == 0)
+        do_crypt(dec_fp, enc_fp, 1, ENC_DATA->enc_key);
+    else
+        do_crypt(dec_fp, enc_fp, -1, ENC_DATA->enc_key);
     /* Close both copies */
     fclose(dec_fp);
     fclose(enc_fp);
@@ -200,7 +253,10 @@ int dec_file_copy(const char* path, const char* dest_path){
     enc_fp = fopen(new_path, "r");
     /* Make decrypted copy at tmp_name */
     dec_fp = fopen(dest_path, "w");
-    do_crypt(enc_fp, dec_fp, 0, ENC_DATA->enc_key);
+    if(getencattr(new_path) == 1)
+        do_crypt(enc_fp, dec_fp, 0, ENC_DATA->enc_key);
+    else
+        do_crypt(enc_fp, dec_fp, -1, ENC_DATA->enc_key);
     /* Close both copies */
     fclose(dec_fp);
     fclose(enc_fp);
@@ -491,6 +547,7 @@ static int xmp_utimens(const char *path, const struct timespec ts[2])
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
     (void)fi;
+    (void)path;
     return 0;
 }
 
@@ -498,6 +555,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
             struct fuse_file_info *fi)
 {
+    (void)fi;
     int fd;
     int res;
     const char* new_path = rewrite_path(path);
@@ -522,6 +580,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 static int xmp_write(const char *path, const char *buf, size_t size,
              off_t offset, struct fuse_file_info *fi)
 {
+    (void)fi;
     int fd;
     int res;
     const char* new_path = rewrite_path(path);
@@ -556,6 +615,7 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 
 static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
 
+    (void)fi;
     int res;
     const char* new_path = rewrite_path(path);
 
@@ -567,6 +627,7 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
     }
     close(res);
 
+    setencattr(new_path, 0);
     enc_file(path);
     free((void*)new_path);
     return 0;
@@ -576,6 +637,7 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
 static int xmp_release(const char *path, struct fuse_file_info *fi)
 {
     (void)fi;
+    (void)path;
     return 0;
 }
 
