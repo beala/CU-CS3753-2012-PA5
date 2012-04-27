@@ -174,6 +174,41 @@ int enc_file(const char* path){
     free((void*)tmp_name);
     return 0;
 }
+
+int enc_file_copy(const char* path, const char* dest_path){
+    const char* new_path = rewrite_path(path);
+    FILE *enc_fp, *dec_fp;
+
+    /* Open decrypted copy */
+    dec_fp = fopen(new_path, "r");
+    /* Make encrypted copy at tmp_name */
+    enc_fp = fopen(dest_path, "w");
+    do_crypt(dec_fp, enc_fp, 1, ENC_DATA->enc_key);
+    /* Close both copies */
+    fclose(dec_fp);
+    fclose(enc_fp);
+    fprintf(stderr, "Enc Copy! Src: %s Dest: %s\n", new_path, dest_path);
+    free((void*)new_path);
+    return 0;
+}
+
+int dec_file_copy(const char* path, const char* dest_path){
+    const char* new_path = rewrite_path(path);
+    FILE *enc_fp, *dec_fp;
+
+    /* Open encrypted copy */
+    enc_fp = fopen(new_path, "r");
+    /* Make decrypted copy at tmp_name */
+    dec_fp = fopen(dest_path, "w");
+    do_crypt(enc_fp, dec_fp, 0, ENC_DATA->enc_key);
+    /* Close both copies */
+    fclose(dec_fp);
+    fclose(enc_fp);
+    fprintf(stderr, "Dec Copy! Src: %s Dest: %s\n", new_path, dest_path);
+    free((void*)new_path);
+    return 0;
+}
+
 /* Truncate the log file. */
 int truncate_log(){
     FILE *logfp = NULL;
@@ -201,26 +236,31 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
     int res;
     time_t atime, mtime, ctime;
     const char* new_path = rewrite_path(path);
+    const char* tmp_name;
     /* Test if the file exists */
     res = lstat(new_path, stbuf);
     if (res == -1){
         return -errno;
     }
+    /* Is the file a regular file? */
     if(S_ISREG(stbuf->st_mode)){
         atime = stbuf->st_atime;
         mtime = stbuf->st_mtime;
         ctime = stbuf->st_ctime;
-        /* If it does, decrypt and get its attrs */
-        dec_file(path);
-        res = lstat(new_path, stbuf);
+        /* Decrypt and get its attrs */
+        tmp_name = tmp_path(new_path);
+        dec_file_copy(path, tmp_name);
+        res = lstat(tmp_name, stbuf);
         if (res == -1){
             return -errno;
         }
-        enc_file(path);
         stbuf->st_atime = atime;
         stbuf->st_mtime = mtime;
         stbuf->st_ctime = ctime;
+        /* Remove the copy */
+        remove(tmp_name);
         free((void*)new_path);
+        free((void*)tmp_name);
     }
     return 0;
 }
@@ -451,7 +491,7 @@ static int xmp_utimens(const char *path, const struct timespec ts[2])
 static int xmp_open(const char *path, struct fuse_file_info *fi)
 {
     (void)fi;
-    return dec_file(path);
+    return 0;
 }
 
 
@@ -461,9 +501,10 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
     int fd;
     int res;
     const char* new_path = rewrite_path(path);
+    const char* tmp_name = tmp_path(new_path);
 
-    fd = open(new_path, O_RDONLY);
-    free((void*)new_path);
+    dec_file_copy(path, tmp_name);
+    fd = open(tmp_name, O_RDONLY);
     if (fd == -1)
         return -errno;
 
@@ -472,6 +513,9 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
         res = -errno;
 
     close(fd);
+    remove(tmp_name);
+    free((void*)new_path);
+    free((void*)tmp_name);
     return res;
 }
 
@@ -482,8 +526,8 @@ static int xmp_write(const char *path, const char *buf, size_t size,
     int res;
     const char* new_path = rewrite_path(path);
 
+    dec_file(path);
     fd = open(new_path, O_WRONLY);
-    free((void*)new_path);
     if (fd == -1)
         return -errno;
 
@@ -492,6 +536,8 @@ static int xmp_write(const char *path, const char *buf, size_t size,
         res = -errno;
 
     close(fd);
+    enc_file(path);
+    free((void*)new_path);
     return res;
 }
 
@@ -530,7 +576,7 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
 static int xmp_release(const char *path, struct fuse_file_info *fi)
 {
     (void)fi;
-    return enc_file(path);
+    return 0;
 }
 
 static int xmp_fsync(const char *path, int isdatasync,
