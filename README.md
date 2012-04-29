@@ -1,9 +1,15 @@
 CS3753 (Operating Systems)
+
 Spring 2012
+
 University of Colorado Boulder
+
 Programming Assignment 5
+
 A FUSE Encrypted File System
+
 Public Code
+
 By Alex Beal <http://usrsb.in>
 
 ###Build###
